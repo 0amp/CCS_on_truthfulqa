@@ -3,6 +3,7 @@ from tqdm import tqdm
 import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
+import random
 
 class LinearProbe(nn.Module): 
     def __init__(self, d): 
@@ -41,24 +42,26 @@ class CCS():
         """
         informative_loss = (t.min(p0, p1)**2).mean(0)
         consistent_loss = ((p0 - (1-p1))**2).mean(0)
-        return informative_loss + consistent_loss
+        return informative_loss + 5*consistent_loss
     
-    def get_acc(self): 
+    def get_acc(self, probe): 
         """
         Computes accuracy for the current parameters on all data
         """
-        p0, p1 = self.probe(self.x0), self.probe(self.x1)
+        p0, p1 = probe(self.x0), probe(self.x1)
         decode = 0.5 * (p0 + (1-p1))
-        pred = (decode > 0.5).float()
+        pred = t.Tensor([0 if d > 0.5 else random.randint(0,1) if d == 0.5 
+                         else 1 for d in decode])
         acc = (pred == self.y).float().mean().item()
-        self.flag = 'acc' if acc > 1-acc else '1-acc'
+        if probe == self.probe: 
+            flag = 'acc' if acc > 1-acc else '1-acc'
         return max(acc, 1-acc)
-
+    
     def make_pred(self, x): 
         if self.flag == 'acc': 
-            return self.probe(x).detach().cpu().numpy()[:,0]
+            return self.probe(x).detach().cpu().numpy()
         else: 
-            return (1-self.probe(x)).detach().cpu().numpy()[:,0]
+            return (1-self.probe(x)).detach().cpu().numpy()
 
     def pred_acc(self, x0, x1, y): 
         """
@@ -66,7 +69,8 @@ class CCS():
         """
         p0, p1 = self.probe(x0), self.probe(x1)
         decode = 0.5 * (p0 + (1-p1))
-        pred = (decode > 0.5).float()
+        pred = t.Tensor([0 if d > 0.5 else random.randint(0,1) if d == 0.5 
+                         else 1 for d in decode])
         acc = (pred == y).float().mean().item()
         if self.flag == 'acc': 
             return acc
@@ -77,7 +81,7 @@ class CCS():
         """
         Does a single training run of nepochs epochs
         """
-        best_acc = 0
+        best_acc = self.get_acc(self.probe)
         best_loss = 1e4
 
         for _ in tqdm(range(self.ntries)): 
@@ -93,7 +97,7 @@ class CCS():
 
                 loss_np = loss.detach().item()
 
-            acc = self.get_acc()
+            acc = self.get_acc(probe)
 
             if acc > best_acc: 
                 self.probe = probe
