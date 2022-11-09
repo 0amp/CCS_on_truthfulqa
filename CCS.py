@@ -16,20 +16,8 @@ class LinearProbe(nn.Module):
     def forward(self, x): 
         return t.sigmoid(self.linear(x))
 
-class MLPProbe(nn.Module): 
-    def __init__(self, d, h): 
-        super().__init__()
-        self.linear1 = nn.Linear(d,h)
-        self.linear2 = nn.Linear(h,1)
-
-    def forward(self, x): 
-        x = self.linear1(x)
-        x = F.relu(x)
-        x = self.linear2(x)
-        return t.sigmoid(x)
-
 class CCS(): 
-    def __init__(self, x0, x1, y, nepochs = 1000, ntries = 10, lr = 1e-1, device='cpu', linear=True):
+    def __init__(self, x0, x1, y, nepochs = 1000, ntries = 10, lr = 1e-1, device='cpu'):
         # x0, x1 are activations for training data, y is labels
         self.x0 = x0
         self.x1 = x1
@@ -37,11 +25,7 @@ class CCS():
         self.y = y
 
         # probe
-        self.linear = linear
-        if self.linear: 
-            self.probe = LinearProbe(self.d)
-        else: 
-            self.probe = MLPProbe(self.d, self.d*4)
+        self.probe = LinearProbe(self.d)
         self.flag = 'acc' # whether to use acc or 1-acc
 
         # training
@@ -50,13 +34,17 @@ class CCS():
         self.lr = lr
         self.device = device
 
+    def get_flag(self): 
+        return self.flag
+    
     def get_loss(self, p0, p1): 
         """
         Returns the CCS loss for two probability tensors each of shape (n,1) or (n,)
         """
         informative_loss = (t.min(p0, p1)**2).mean(0)
         consistent_loss = ((p0 - (1-p1))**2).mean(0)
-        return informative_loss + 5*consistent_loss
+        prob_loss = ((t.ones((p0.shape[0]))-(p0 + p1))**2).mean(0)
+        return informative_loss + consistent_loss + prob_loss
     
     def get_acc(self, probe): 
         """
@@ -99,7 +87,7 @@ class CCS():
         best_loss = 1e4
 
         for _ in tqdm(range(self.ntries)): 
-            probe = LinearProbe(self.d) if self.linear else MLPProbe(self.d, self.d*4)
+            probe = LinearProbe(self.d)
             optimizer = t.optim.AdamW(probe.parameters(), lr=self.lr)
 
             for epoch in range(self.nepochs): 
