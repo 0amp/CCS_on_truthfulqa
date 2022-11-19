@@ -43,7 +43,11 @@ class CCS():
         """
         informative_loss = (t.min(p0, p1)**2).mean(0)
         consistent_loss = ((p0 - (1-p1))**2).mean(0)
+<<<<<<< HEAD
         prob_loss = ((1-(p0 + p1))**2).mean(0)
+=======
+        prob_loss = ((t.ones((p0.shape[0]))-(p0 + p1))**2).mean(0)
+>>>>>>> 7c910a65bef59672bb1ee414ea19f290fbb97a4a
         return informative_loss + consistent_loss + prob_loss
     
     def get_acc(self, probe): 
