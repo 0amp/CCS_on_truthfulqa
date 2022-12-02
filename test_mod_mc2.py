@@ -1,5 +1,3 @@
-# %% [markdown]
-# Setup
 
 # %%
 %load_ext autoreload
@@ -7,69 +5,72 @@
 
 # %%
 import torch as t
-import pandas as pd
 from tqdm import tqdm
 from einops import rearrange, reduce, repeat
 from CCS import CCS
-from utils import *
-
+from utils import * 
+import seaborn as sns
+import matplotlib.pyplot as plt
 # %%
-data = pd.read_csv('data/modifiedtqa.csv')
-data['label'] = data['label'].apply(lambda x: 1 if x == 'Yes' else 0)
-data['yes'] = data['question'] + ' Yes'
-data['no'] = data['question'] + ' No'
-data = data.drop(['question'], axis=1)
-data = data.to_dict('records')
-data = data[:200]
-
-# %%
-from transformers import GPT2LMHeadModel, GPT2Config, GPT2Tokenizer
-tokenizer = GPT2Tokenizer.from_pretrained("gpt2-xl")
-config = GPT2Config.from_pretrained("gpt2-xl", output_hidden_states=True)
-model = GPT2LMHeadModel.from_pretrained("gpt2-xl", config=config) 
-
-def generate(prompt, max_length = 40, do_sample=True, top_p = 0.95, top_k =60, **model_kwargs): 
-    inputs = tokenizer(prompt, return_tensors="pt")["input_ids"]
-    output_sequences = model.generate(inputs,max_length=max_length, 
-                                      do_sample=do_sample,top_p=top_p,
-                                      top_k=top_k,**model_kwargs)
-    return tokenizer.decode(output_sequences[0], skip_special_tokens=True)
-
-out = generate(data[0]['yes'])
-print(out)
-
-# %%
-activations, labels = get_activations(model, tokenizer, data, [24], 1)
+# load activations and labels
+all_acts = t.load('activations/gpt2-xl/activations.pt')
+print(all_acts.shape)
+activations = all_acts[:,:,24,:]
 print(activations.shape)
-labels.shape
 
-# %% 
-# get activations from .pt file
-acts = t.load('activations/gpt2-xl/activations.pt')
-acts = acts[:200]
+labels = t.load('data/labels.pt')
 # %%
-x0 = activations[:100,0,:].detach()
+tn = 500
+x0 = activations[:tn,0,:]
 x0 = (x0 - x0.mean(axis=0, keepdims=True))/x0.std(axis=0, keepdims=True)
-x1 = activations[:100,1,:].detach()
+x1 = activations[:tn,1,:]
 x1 = (x1 - x1.mean(axis=0, keepdims=True))/x1.std(axis=0, keepdims=True)
-y = labels[:100]
-testx0 = activations[100:,0,:].detach()
+y = labels[:tn]
+testx0 = activations[tn:,0,:]
 testx0 = (testx0 - testx0.mean(axis=0, keepdims=True))/testx0.std(axis=0, keepdims=True)
-testx1 = activations[100:,1,:].detach()
+testx1 = activations[tn:,1,:]
 testx1 = (testx1 - testx1.mean(axis=0, keepdims=True))/testx1.std(axis=0, keepdims=True)
-testy = labels[100:]
+testy = labels[tn:]
 
 ccs = CCS(x0, x1, y, ntries=10)
 print("\n", ccs.train())
 print(ccs.get_flag())
 
 # WEIRD THINGS
-## back to always having the flag be 'acc' even though that leads to bad pred scores
-## want the p0 and p1 to sum to 1 and working on a loss term to enforce that
-## add MLP probe back in to see if that helps
+## doesn't return actual max(acc, 1-acc) ! 
+## add terms to loss maybe
 
 # %%
 print(ccs.pred_acc(testx0, testx1, testy))
+
+# %%
+# run CCS on tn data points for all potential layers and plot results
+layer_accs = []
+tn = 400
+for i in range(5,all_acts.shape[2]-5): 
+    acts = all_acts[:tn,:,i,:]
+    x0, x1 = acts[:,0,:], acts[:,1,:]
+    x0 = (x0 - x0.mean(axis=0, keepdims=True))/x0.std(axis=0, keepdims=True)
+    x1 = (x1 - x1.mean(axis=0, keepdims=True))/x1.std(axis=0, keepdims=True)
+    y, testy = labels[:tn], labels[tn:]
+    xtest0, xtest1 = activations[tn:,0,:], activations[tn:,1,:]
+    xtest0 = (xtest0 - xtest0.mean(axis=0, keepdims=True))/xtest0.std(axis=0, keepdims=True)
+    xtest1 = (xtest1 - xtest1.mean(axis=0, keepdims=True))/xtest1.std(axis=0, keepdims=True)
+    ccs = CCS(x0, x1, y, ntries=10)
+    print("LAYER: ", i)
+    ccs.train()
+    pred = ccs.pred_acc(xtest0, xtest1, testy)
+    pred = max(pred, 1-pred)
+    print("PRED ACC: ", pred)
+    layer_accs.append(pred)
+
+# %%
+x = list(range(5,all_acts.shape[2]-5))
+zero_shot = 0.4888
+# add dotted line for zero shot accuracy to sns plot with layer_accs
+sns.lineplot(x = x, y = layer_accs)
+plt.axhline(y=zero_shot, color='r', linestyle='--')
+plt.show()
 
 # %%
 def view_CCS_pred(data_index, ccs): 
@@ -90,6 +91,22 @@ for i in range(10):
 
 # %%
 # RESULT: 0.5312
+# RESULT2: 0.4688
+
+from transformers import GPT2Tokenizer, GPT2LMHeadModel, GPT2Config
+import pandas as pd
+tokenizer = GPT2Tokenizer.from_pretrained("gpt2-xl")
+config = GPT2Config.from_pretrained("gpt2-xl", output_hidden_states=True)
+model = GPT2LMHeadModel.from_pretrained("gpt2-xl", config=config) 
+
+data = pd.read_csv('data/modifiedtqa.csv')
+data['label'] = data['label'].apply(lambda x: 1 if x == 'Yes' else 0)
+data['yes'] = data['question'] + ' Yes'
+data['no'] = data['question'] + ' No'
+data = data.drop(['question'], axis=1)
+data = data.to_dict('records')
+data = data[300:450]
 
 print(get_normalized_score(model, tokenizer, data, labels))
         
+# %%

@@ -35,7 +35,7 @@ def get_normalized_score(model, tokenizer, dataset, labels):
         no_logit = get_logit(model, tokenizer, question, 'No')
         p = t.softmax(t.stack([yes_logit, no_logit]), dim=0) 
         correct_prob.append(p[labels[i]])
-    return sum(correct_prob)/len(correct_prob).item()
+    return sum(correct_prob)/len(correct_prob)
 
 def get_logit(model, tokenizer, prompt, answer):
     """
