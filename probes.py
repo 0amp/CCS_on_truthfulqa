@@ -22,7 +22,6 @@ from datasets import load_dataset
 from abc import ABC, abstractmethod
  
 class Probe(ABC):
- 
     @abstractmethod
     def fit(self):
         pass
@@ -46,7 +45,7 @@ class MLPProbe(nn.Module):
         o = self.linear2(h)
         return torch.sigmoid(o)
 
-def normalize(x, var_normalize = False):
+def normalize(x: torch.Tensor, var_normalize: bool = False):
     """
     Mean-normalizes the data x (of shape (n, d))
     If self.var_normalize, also divides by the standard deviation
@@ -57,7 +56,9 @@ def normalize(x, var_normalize = False):
 
     return normalized_x
 
-def normalize_then_diff(x0, x1, var_normalize = False):        
+def normalize_then_diff(x0: torch.Tensor, 
+                        x1: torch.Tensor, 
+                        var_normalize: bool = False):        
     return normalize(x0, var_normalize=var_normalize) - normalize(x1, var_normalize=var_normalize)
     
 class CCS(Probe):
@@ -65,9 +66,6 @@ class CCS(Probe):
                  verbose=False, device="cuda", linear=True, weight_decay=0.01, var_normalize=False):
         # data
         self.var_normalize = var_normalize
-        # self.x0 = normalize(x0, var_normalize = self.var_normalize)
-        # self.x1 = normalize(x1, var_normalize = self.var_normalize)
-        # self.d = self.x0.shape[-1]
 
         # training
         self.nepochs = nepochs
@@ -80,26 +78,13 @@ class CCS(Probe):
         
         # probe
         self.linear = linear
-        
-        # self.probe = self.initialize_probe()
-        # self.best_probe = copy.deepcopy(self.probe)
-
-        
+ 
     def initialize_probe(self):
         if self.linear:
             self.probe = nn.Linear(self.d, 1)
         else:
             self.probe = MLPProbe(self.d)
         self.probe.to(self.device)    
-        
-    def get_tensor_data(self):
-        """
-        Returns x0, x1 as appropriate tensors (rather than np arrays)
-        """
-        x0 = torch.tensor(self.x0, dtype=torch.float, requires_grad=False, device=self.device)
-        x1 = torch.tensor(self.x1, dtype=torch.float, requires_grad=False, device=self.device)
-        return x0, x1
-    
 
     def get_loss(self, p0, p1):
         """
@@ -122,8 +107,9 @@ class CCS(Probe):
         return acc
     
     def predict(self, x0, x1):
-        x0 = torch.tensor(normalize(x0, var_normalize = self.var_normalize), dtype=torch.float, requires_grad=False, device=self.device)
-        x1 = torch.tensor(normalize(x1, var_normalize = self.var_normalize), dtype=torch.float, requires_grad=False, device=self.device)
+        x0 = normalize(x0, var_normalize = self.var_normalize) #? what happens when there's only one datapoint
+        
+        x1 = normalize(x1, var_normalize = self.var_normalize)
         with torch.no_grad():
             p0, p1 = self.best_probe(x0), self.best_probe(x1)
         avg_confidence = 0.5*(p0 + (1-p1))
@@ -170,7 +156,7 @@ class CCS(Probe):
         self.d = self.x0.shape[-1]
         
         best_loss = np.inf
-        for train_num in range(self.ntries):
+        for train_num in tqdm(range(self.ntries)):
             self.initialize_probe()
             loss = self.train()
             if loss < best_loss:
@@ -184,24 +170,40 @@ class TPC(Probe):
     def __init__(self, n_components = 5, svd_solver="full"):
         self.model = PCA(n_components=n_components, svd_solver=svd_solver)
     
-    def fit(self, x0, x1):        
-        self.model.fit(normalize_then_diff(x0, x1))
+    def fit(self, x0, x1):  
+        #n x n_layer x dim
+        data = normalize_then_diff(x0, x1).cpu().numpy().reshape(-1, x0.shape[-1])
+        self.model.fit(data)
         
     def predict(self, x0, x1):
-        return self.model.transform(normalize_then_diff(x0, x1))
+        data = normalize_then_diff(x0, x1).cpu().numpy().reshape(-1, x0.shape[-1])
+        
+        return ((data @ self.model.components_[0]) < 0.5).astype(int)
+    
+        # return self.model.transform(normalize_then_diff(x0, x1).cpu().numpy())
     
     def score(self, x0, x1, labels):
-        return self.model.score(normalize_then_diff(x0, x1), labels)
+        predictions = self.predict(x0, x1)
+        
+        acc = (predictions == labels.numpy()).mean()
+        acc = max(acc, 1 - acc)
+
+        return acc
+        # return self.model.score(data, labels)
         
 class LR(Probe):
     def __init__(self):
         self.model = LogisticRegression(max_iter = 10_000, n_jobs = 1, C = 0.1)
 
     def fit(self, x0, x1, labels):
-        self.model.fit(normalize_then_diff(x0, x1), labels)
+        data = normalize_then_diff(x0, x1).cpu().numpy().reshape(-1, x0.shape[-1])
+        self.model.fit(data, labels)
     
     def predict(self, x0, x1):
-        self.model.predict(normalize_then_diff(x0, x1))
+        data = normalize_then_diff(x0, x1).cpu().numpy().reshape(-1, x0.shape[-1])
+        
+        self.model.predict(data)
     
     def score(self, x0, x1, labels):
-        return self.model.score(normalize_then_diff(x0, x1), labels)
+        data = normalize_then_diff(x0, x1).cpu().numpy().reshape(-1, x0.shape[-1])
+        return self.model.score(data, labels)

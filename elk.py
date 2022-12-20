@@ -51,9 +51,8 @@ class ELK():
         """
         return self.mt.get_activations_last_idx(yes_examples, layers), self.mt.get_activations_last_idx(no_examples, layers)
     
-    def train_probe(self, yes_acts, no_acts, probe_type="CCS", labels = None): 
+    def train_probe(self, yes_acts, no_acts, labels = None, probe_type="CCS"): 
         if probe_type == "CCS":
-            
             self.CCS.fit(yes_acts, no_acts)
         elif probe_type == "LR":
             self.LR.fit(yes_acts, no_acts, labels)
