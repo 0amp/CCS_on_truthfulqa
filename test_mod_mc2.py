@@ -14,31 +14,34 @@ import seaborn as sns
 import matplotlib.pyplot as plt
 # %%
 # load activations and labels
-all_acts = t.load('activations/gpt2-xl/activations.pt')
+model_name = "gpt2-medium"
+
+all_acts = t.load(f'activations/{model_name}/activations.pt')
 print(all_acts.shape)
-activations = all_acts[:,:,24,:]
+activations = all_acts[:,:,-1,:]
 print(activations.shape)
 
 labels = t.load('data/labels.pt')
+
 # %%
 # load model
-model = GPT2Wrapper('gpt2-xl', device='cpu')
+model = GPT2Wrapper(model_name, device='cuda')
 
 # test model generate
-prompt = 'The sky is blue. The grass is green. The sun is yellow. The moon is'
-print(model.generate(prompt))
+# prompt = 'The sky is blue. The grass is green. The sun is yellow. The moon is'
+# print(model.generate(prompt))
 
 # %%
 tn = 500
 x0 = activations[:tn,0,:]
-x0 = (x0 - x0.mean(axis=0, keepdims=True))/x0.std(axis=0, keepdims=True)
+# x0 = (x0 - x0.mean(axis=0, keepdims=True))/x0.std(axis=0, keepdims=True)
 x1 = activations[:tn,1,:]
-x1 = (x1 - x1.mean(axis=0, keepdims=True))/x1.std(axis=0, keepdims=True)
+# x1 = (x1 - x1.mean(axis=0, keepdims=True))/x1.std(axis=0, keepdims=True)
 y = labels[:tn]
 testx0 = activations[tn:,0,:]
-testx0 = (testx0 - testx0.mean(axis=0, keepdims=True))/testx0.std(axis=0, keepdims=True)
+# testx0 = (testx0 - testx0.mean(axis=0, keepdims=True))/testx0.std(axis=0, keepdims=True)
 testx1 = activations[tn:,1,:]
-testx1 = (testx1 - testx1.mean(axis=0, keepdims=True))/testx1.std(axis=0, keepdims=True)
+# testx1 = (testx1 - testx1.mean(axis=0, keepdims=True))/testx1.std(axis=0, keepdims=True)
 testy = labels[tn:]
 
 model.train_CCS(x0, x1, y)
@@ -47,6 +50,8 @@ model.train_CCS(x0, x1, y)
 ## doesn't return actual max(acc, 1-acc) ! 
 ## add terms to loss maybe
 
+#%%
+testx1.shape
 # %%
 print(model.CCS_pred_acc(testx0, testx1, testy))
 
@@ -102,9 +107,9 @@ for i in range(10):
 
 from transformers import GPT2Tokenizer, GPT2LMHeadModel, GPT2Config
 import pandas as pd
-tokenizer = GPT2Tokenizer.from_pretrained("gpt2-xl")
-config = GPT2Config.from_pretrained("gpt2-xl", output_hidden_states=True)
-model = GPT2LMHeadModel.from_pretrained("gpt2-xl", config=config) 
+tokenizer = GPT2Tokenizer.from_pretrained(model_name)
+config = GPT2Config.from_pretrained(model_name, output_hidden_states=True)
+model = GPT2LMHeadModel.from_pretrained(model_name, config=config) 
 
 data = pd.read_csv('data/modifiedtqa.csv')
 data['label'] = data['label'].apply(lambda x: 1 if x == 'Yes' else 0)
