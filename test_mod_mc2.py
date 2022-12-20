@@ -8,6 +8,7 @@ import torch as t
 from tqdm import tqdm
 from einops import rearrange, reduce, repeat
 from CCS import CCS
+from GPT2Wrapper import GPT2Wrapper
 from utils import * 
 import seaborn as sns
 import matplotlib.pyplot as plt
@@ -19,6 +20,14 @@ activations = all_acts[:,:,24,:]
 print(activations.shape)
 
 labels = t.load('data/labels.pt')
+# %%
+# load model
+model = GPT2Wrapper('gpt2-xl', device='cpu')
+
+# test model generate
+prompt = 'The sky is blue. The grass is green. The sun is yellow. The moon is'
+print(model.generate(prompt))
+
 # %%
 tn = 500
 x0 = activations[:tn,0,:]
@@ -32,16 +41,14 @@ testx1 = activations[tn:,1,:]
 testx1 = (testx1 - testx1.mean(axis=0, keepdims=True))/testx1.std(axis=0, keepdims=True)
 testy = labels[tn:]
 
-ccs = CCS(x0, x1, y, ntries=10)
-print("\n", ccs.train())
-print(ccs.get_flag())
+model.train_CCS(x0, x1, y)
 
 # WEIRD THINGS
 ## doesn't return actual max(acc, 1-acc) ! 
 ## add terms to loss maybe
 
 # %%
-print(ccs.pred_acc(testx0, testx1, testy))
+print(model.CCS_pred_acc(testx0, testx1, testy))
 
 # %%
 # run CCS on tn data points for all potential layers and plot results
