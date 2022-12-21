@@ -119,24 +119,27 @@ class HFModelWrapper():
             output = self.model(**tokens, output_hidden_states = True) #
 
             #hidden states has n_layers + 1 entires: one for the output of embeddings, one for output of each layer
-            #with shape layer x batch x token x dim 
+            #with shape: layer x batch x token x dim 
             return torch.stack(output['hidden_states'])[layers, :, -1, :].squeeze(1) #batch dim gets squeezed out
         elif "t5" in self.model_name:
-            encoder_text_ids = self.tokenizer.encode_plus(prompt, return_tensors="pt").input_ids.to(self.device)
-            decoder_text_ids = self.tokenizer.encode_plus("", return_tensors="pt").input_ids.to(self.device)
+            encoder_text_ids = self.tokenizer(prompt, return_tensors="pt").input_ids.to(self.device)
+            decoder_text_ids = self.tokenizer("", return_tensors="pt").input_ids.to(self.device)
 
             # forward pass
             with torch.no_grad():
                 output = self.model(encoder_text_ids, decoder_input_ids=decoder_text_ids, output_hidden_states=True)
 
             # get the appropriate hidden states
-            return torch.stack(output['encoder_hidden_states'])[layers, 0, -1, :] #batch dim gets squeezed out
+            hs_tuple = output["encoder_hidden_states"]
+            hs = hs_tuple[-1][0, -1]
+            return hs
+            # return torch.stack(output['encoder_hidden_states'])[-1, 0, -1] #batch dim gets squeezed out
 
     
     def get_activations_last_idx(self, prompts: List[str], layers:List[int]):
         # tokens = self.tokenizer.batch_encode_plus(prompts, return_tensors='pt', padding = True).to(self.device) #dict containing input_ids and attention_mask
         #TODO: vectorize this
-        return torch.stack([self.get_hidden_state(prompt, layers = layers) for prompt in tqdm(prompts)]) #n x n_layers x dim
+        return torch.stack([self.get_hidden_state(prompt, layers = layers) for prompt in tqdm(prompts)]).detach().cpu().numpy() #n x n_layers x dim
         
         
     # def train_CCS(self, x0, x1, nepochs=100, device='cuda'):

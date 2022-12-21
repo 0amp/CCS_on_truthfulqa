@@ -63,7 +63,7 @@ def normalize_then_diff(x0: torch.Tensor,
     
 class CCS(Probe):
     def __init__(self, nepochs=1000, ntries=10, lr=1e-3, batch_size=-1, 
-                 verbose=False, device="cuda", linear=True, weight_decay=0.01, var_normalize=True):
+                 verbose=False, device="cuda", linear=True, weight_decay=0.01, var_normalize=False):
         # data
         self.var_normalize = var_normalize
 
@@ -94,6 +94,11 @@ class CCS(Probe):
         consistent_loss = ((p0 - (1-p1))**2).mean(0)
         return informative_loss + consistent_loss
 
+    def tensorize_data(self, x):
+        """
+        Returns x0, x1 as appropriate tensors (rather than np arrays)
+        """
+        return torch.tensor(x, dtype=torch.float, requires_grad=False, device=self.device)
 
     def score(self, x0_test, x1_test, y_test):
         """
@@ -101,15 +106,15 @@ class CCS(Probe):
         """
         predictions = self.predict(x0_test, x1_test)
 
-        acc = (predictions == y_test.numpy()).mean()
+        acc = (predictions == y_test).mean()
         acc = max(acc, 1 - acc)
 
         return acc
     
     def predict(self, x0, x1):
-        x0 = normalize(x0, var_normalize = self.var_normalize) #? what happens when there's only one datapoint
+        x0 = normalize(self.tensorize_data(x0), var_normalize = self.var_normalize) #? what happens when there's only one datapoint
+        x1 = normalize(self.tensorize_data(x1), var_normalize = self.var_normalize)
         
-        x1 = normalize(x1, var_normalize = self.var_normalize)
         with torch.no_grad():
             p0, p1 = self.best_probe(x0), self.best_probe(x1)
         avg_confidence = 0.5*(p0 + (1-p1))
@@ -121,7 +126,7 @@ class CCS(Probe):
         """
         Does a single training run of nepochs epochs
         """
-        x0, x1 = self.x0, self.x1 #these are already normalized
+        x0, x1 = self.x0.copy(), self.x1.copy() #these are already normalized
         permutation = torch.randperm(len(x0))
         x0, x1 = x0[permutation], x1[permutation]
         
@@ -151,8 +156,8 @@ class CCS(Probe):
         return loss.detach().cpu().item()
     
     def fit(self, x0, x1):
-        self.x0 = normalize(x0, var_normalize = self.var_normalize)
-        self.x1 = normalize(x1, var_normalize = self.var_normalize)
+        self.x0 = normalize(self.tensorize_data(x0), var_normalize = self.var_normalize)
+        self.x1 = normalize(self.tensorize_data(x1), var_normalize = self.var_normalize)
         self.d = self.x0.shape[-1]
         
         best_loss = np.inf
@@ -193,17 +198,24 @@ class TPC(Probe):
         
 class LR(Probe):
     def __init__(self):
-        self.model = LogisticRegression(max_iter = 10_000, n_jobs = 1, C = 0.1)
+        self.model = LogisticRegression(max_iter = 10_000, n_jobs = 1, C = 0.1, class_weight="balanced")
 
     def fit(self, x0, x1, labels):
-        data = normalize_then_diff(x0, x1).cpu().numpy().reshape(-1, x0.shape[-1])
+        data = (x0 - x1).reshape(-1, x0.shape[-1])
+        # data = normalize_then_diff(x0, x1).cpu().numpy().reshape(-1, x0.shape[-1])
+        
         self.model.fit(data, labels)
     
     def predict(self, x0, x1):
-        data = normalize_then_diff(x0, x1).cpu().numpy().reshape(-1, x0.shape[-1])
+        data = (x0 - x1).reshape(-1, x0.shape[-1])
+
+        # data = normalize_then_diff(x0, x1).cpu().numpy().reshape(-1, x0.shape[-1])
         
         self.model.predict(data)
     
     def score(self, x0, x1, labels):
-        data = normalize_then_diff(x0, x1).cpu().numpy().reshape(-1, x0.shape[-1])
+        data = (x0 - x1).reshape(-1, x0.shape[-1])
+
+        # data = normalize_then_diff(x0, x1).cpu().numpy().reshape(-1, x0.shape[-1])
+        
         return self.model.score(data, labels)

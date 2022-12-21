@@ -12,7 +12,7 @@ from datetime import date
 
 import openai
 
-from transformers import T5Tokenizer, T5ForConditionalGeneration
+from transformers import T5Tokenizer, T5ForConditionalGeneration, AutoModelForSeq2SeqLM, AutoTokenizer
 
 from model_wrappers import HFModelWrapper, OpenAIModel
 from probes import CCS, TPC, LR
@@ -33,7 +33,7 @@ class ELK():
 
             self.mt = OpenAIModel(model_name)
         elif "t5" in model_name:
-            tokenizer = T5Tokenizer.from_pretrained(model_name)
+            tokenizer = AutoTokenizer.from_pretrained(model_name)
             model = T5ForConditionalGeneration.from_pretrained(model_name)
             
             self.mt = HFModelWrapper(model_name, tokenizer = tokenizer, model = model, use_cuda = use_cuda)
@@ -134,11 +134,11 @@ class ELK():
     def zero_shot_score(self, prompts, labels, dataset_name): 
         zero_shot_prob = self.normalized_zero_shot_prob(prompts, dataset_name)
         
-        if dataset_name == "modifiedtqa":
-            return ((zero_shot_prob[:, 0] > 0.5).astype(int) == labels).astype(int).sum() / zero_shot_prob.shape[0]
-        else: 
+        # if dataset_name == "modifiedtqa":
+        return ((zero_shot_prob[:, 0] > 0.5).astype(int) == labels).astype(int).sum() / zero_shot_prob.shape[0]
+        # else: 
             #if it's positive, zero_shot_prob is 1, which lines up with labels
-            return ((zero_shot_prob[:, 1] > 0.5).astype(int) == labels).astype(int).sum() / zero_shot_prob.shape[0]
+            # return ((zero_shot_prob[:, 1] > 0.5).astype(int) == labels).astype(int).sum() / zero_shot_prob.shape[0]
 
 
 
