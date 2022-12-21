@@ -8,6 +8,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import math
 from tqdm import tqdm
+from datetime import date
 
 import openai
 
@@ -22,7 +23,7 @@ class ELK():
 
         """
         
-        if "gpt2" in model_name:
+        if "gpt" in model_name:
             self.mt = HFModelWrapper(model_name, use_cuda = use_cuda)
             
         elif "ada" in model_name or "babbage" in model_name or "curie" in model_name:
@@ -43,17 +44,29 @@ class ELK():
         self.TPC = TPC()
         self.LR = LR()
 
-    def gen_hidden_states(self, yes_examples: List[str], no_examples: List[str], layers: List[int]): 
+    def gen_hidden_states(self, yes_examples: List[str], no_examples: List[str], layers: List[int], 
+                          store_acts: bool = False,
+                          dataset_name: str = ""): 
         """
         Generates hidden states at specified layers for yes and no sentence pairs. 
         Output shape is (num_examples, len(layers), hidden_size). Inputs are a list
         of strings. 
         """
-        return self.mt.get_activations_last_idx(yes_examples, layers), self.mt.get_activations_last_idx(no_examples, layers)
+
+        # yes_examples = [example for example in yes_examples if len(self.mt.tokenizer(example).input_ids) < self.mt.n_ctx] #this was causing cuda errors w t5 for some reason
+        # no_examples = [example for example in no_examples if len(self.mt.tokenizer(example).input_ids) < self.mt.n_ctx]
+
+        x_plus_acts, x_minus_acts = self.mt.get_activations_last_idx(yes_examples, layers), self.mt.get_activations_last_idx(no_examples, layers)
+        
+        if store_acts:
+            torch.save(x_plus_acts, f"activations/{self.mt.model_name}/{dataset_name}_x_plus_activations_{date.today()}.pt")
+            torch.save(x_minus_acts, f"activations/{self.mt.model_name}/{dataset_name}_x_minus_activations_{date.today()}.pt")
+
+        return x_plus_acts, x_minus_acts
     
     def train_probe(self, yes_acts, no_acts, labels = None, probe_type="CCS"): 
         if probe_type == "CCS":
-            self.CCS.fit(yes_acts, no_acts)
+            return self.CCS.fit(yes_acts, no_acts)
         elif probe_type == "LR":
             self.LR.fit(yes_acts, no_acts, labels)
         elif probe_type == "TPC":
@@ -99,21 +112,33 @@ class ELK():
             print("LABEL: ", labels[i])
             print("---------")
 
-    def normalized_zero_shot_prob(self, prompts): 
+    def normalized_zero_shot_prob(self, prompts, dataset_name): 
         """
         Test zero shot performance of model on a set of yes ands by 
         comparing normalized scores of the 'yes' and 'no' logits. Inputs are a
         list of strings. 
         """
+        label_dict = {
+            "imdb": ["negative", "positive"], # This is for normal IMDB
+            "amazon-polarity": ["negative", "positive"],
+            "ag-news": ["politics", "sports", "business", "technology"],
+            "modifiedtqa": ["Yes", "No"],
+        }
+        
         # TODO: assumes get_logit is implemented for all models
-        yes_logits = torch.stack([self.mt.get_logit(prompt, "yes") for prompt in tqdm(prompts)])
-        no_logits = torch.stack([self.mt.get_logit(prompt, "no") for prompt in tqdm(prompts)])
+        yes_logits = torch.stack([self.mt.get_logit(prompt, label_dict[dataset_name][0]) for prompt in tqdm(prompts)])
+        no_logits = torch.stack([self.mt.get_logit(prompt, label_dict[dataset_name][1]) for prompt in tqdm(prompts)])
         stacked = torch.stack([yes_logits, no_logits], dim=1) #n x 2
         return F.softmax(stacked, dim=1).cpu().detach().numpy()
 
-    def zero_shot_score(self, prompts, labels): 
-        zero_shot_prob = self.normalized_zero_shot_prob(prompts)
-        return ((zero_shot_prob[:, 0] > 0.5).astype(int) == labels).astype(int).sum() / zero_shot_prob.shape[0]
+    def zero_shot_score(self, prompts, labels, dataset_name): 
+        zero_shot_prob = self.normalized_zero_shot_prob(prompts, dataset_name)
+        
+        if dataset_name == "modifiedtqa":
+            return ((zero_shot_prob[:, 0] > 0.5).astype(int) == labels).astype(int).sum() / zero_shot_prob.shape[0]
+        else: 
+            #if it's positive, zero_shot_prob is 1, which lines up with labels
+            return ((zero_shot_prob[:, 1] > 0.5).astype(int) == labels).astype(int).sum() / zero_shot_prob.shape[0]
 
 
 

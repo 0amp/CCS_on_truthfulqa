@@ -58,12 +58,12 @@ def normalize(x: torch.Tensor, var_normalize: bool = False):
 
 def normalize_then_diff(x0: torch.Tensor, 
                         x1: torch.Tensor, 
-                        var_normalize: bool = False):        
+                        var_normalize: bool = True):        
     return normalize(x0, var_normalize=var_normalize) - normalize(x1, var_normalize=var_normalize)
     
 class CCS(Probe):
     def __init__(self, nepochs=1000, ntries=10, lr=1e-3, batch_size=-1, 
-                 verbose=False, device="cuda", linear=True, weight_decay=0.01, var_normalize=False):
+                 verbose=False, device="cuda", linear=True, weight_decay=0.01, var_normalize=True):
         # data
         self.var_normalize = var_normalize
 

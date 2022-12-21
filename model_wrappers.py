@@ -48,9 +48,9 @@ class HFModelWrapper():
             
         self.tokenizer = tokenizer
         self.model = model
-        self.name = model_name
+        self.model_name = model_name
         
-        if "gpt" in self.name:
+        if "gpt" in self.model_name:
             self.num_layers = len(
                 [
                     n
@@ -58,7 +58,12 @@ class HFModelWrapper():
                     if re.match(r"^transformer\.h\.\d+$", n)
                 ]
             )
-        elif "t5" in self.name:
+            
+            if "EleutherAI" in self.model_name:
+                self.n_ctx = self.model.config.n_positions
+            else:
+                self.n_ctx = self.model.config.n_ctx 
+        elif "t5" in self.model_name:
             self.num_layers = len(
                 [
                     n for n, m in model.named_modules() 
@@ -68,7 +73,9 @@ class HFModelWrapper():
                     if re.match(r'^decoder\.block\.\d$', n)
                 ]
             )
-        
+            
+            self.n_ctx = self.model.config.n_positions
+                
         assert self.num_layers > 0
         
         self.device = "cuda:0" if torch.cuda.is_available() and use_cuda else "cpu"
@@ -82,9 +89,18 @@ class HFModelWrapper():
             self.model.parallelize()
     
     def get_logit(self, prompt, token):
-        input = self.tokenizer(prompt, return_tensors="pt")["input_ids"].to(self.device)
-        logits = self.model(input)[0][0,-1,:].detach()
-        return logits[self.tokenizer(token).input_ids[0]]
+        if "gpt" in self.model_name:
+            input = self.tokenizer(prompt, return_tensors="pt")["input_ids"].to(self.device)
+            logits = self.model(input)[0][0,-1,:].detach()
+            return logits[self.tokenizer(token).input_ids[0]]
+        elif "t5" in self.model_name:
+            encoder_text_ids = self.tokenizer.encode_plus(prompt, return_tensors="pt").input_ids.to(self.device)
+            decoder_text_ids = self.tokenizer.encode_plus("", return_tensors="pt").input_ids.to(self.device)
+            
+            logits = self.model(encoder_text_ids, decoder_input_ids=decoder_text_ids)[0][0, -1, :].detach()
+            return logits[self.tokenizer(token).input_ids[0]]
+            
+
 
 
     def forward(self, input_ids, attention_mask=None, token_type_ids=None, position_ids=None, head_mask=None):
@@ -97,27 +113,30 @@ class HFModelWrapper():
         return self.tokenizer.decode(model_logits[0], skip_special_tokens=True)
 
     def get_hidden_state(self, prompt: str, layers: List[int]):
-        tokens = self.tokenizer.encode_plus(prompt, return_tensors='pt').to(self.device) #dict containing input_ids and attention_mask
-        
-        output = self.model(**tokens, output_hidden_states = True) #
+        if "gpt" in self.model_name:
+            tokens = self.tokenizer.encode_plus(prompt, return_tensors='pt').to(self.device) #dict containing input_ids and attention_mask
+                    
+            output = self.model(**tokens, output_hidden_states = True) #
 
-        #hidden states has n_layers + 1 entires: one for the output of embeddings, one for output of each layer
-        #with shape layer x batch x token x dim 
-        return torch.stack(output['hidden_states'])[layers, :, -1, :].squeeze(1) #batch dim gets squeezed out
+            #hidden states has n_layers + 1 entires: one for the output of embeddings, one for output of each layer
+            #with shape layer x batch x token x dim 
+            return torch.stack(output['hidden_states'])[layers, :, -1, :].squeeze(1) #batch dim gets squeezed out
+        elif "t5" in self.model_name:
+            encoder_text_ids = self.tokenizer.encode_plus(prompt, return_tensors="pt").input_ids.to(self.device)
+            decoder_text_ids = self.tokenizer.encode_plus("", return_tensors="pt").input_ids.to(self.device)
+
+            # forward pass
+            with torch.no_grad():
+                output = self.model(encoder_text_ids, decoder_input_ids=decoder_text_ids, output_hidden_states=True)
+
+            # get the appropriate hidden states
+            return torch.stack(output['encoder_hidden_states'])[layers, 0, -1, :] #batch dim gets squeezed out
+
     
     def get_activations_last_idx(self, prompts: List[str], layers:List[int]):
         # tokens = self.tokenizer.batch_encode_plus(prompts, return_tensors='pt', padding = True).to(self.device) #dict containing input_ids and attention_mask
         #TODO: vectorize this
         return torch.stack([self.get_hidden_state(prompt, layers = layers) for prompt in tqdm(prompts)]) #n x n_layers x dim
-
-    def get_activations_batch(self, prompts, layer=0, device='cuda'):
-        """
-        Get activations for a batch of prompts. Output shape is (batch_size, seq_len, hidden_size)
-        """
-        input_ids = self.tokenizer(prompts, return_tensors='pt', padding=True).to(device)
-        with t.no_grad():
-            output = self.model(input_ids)
-            return output[2][layer].cpu()
         
         
     # def train_CCS(self, x0, x1, nepochs=100, device='cuda'):
